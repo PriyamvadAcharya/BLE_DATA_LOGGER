@@ -1,0 +1,1171 @@
+/* mbed Microcontroller Library
+ * Copyright (c) 2006-2013 ARM Limited
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "mbed.h"
+#include "ble/BLE.h"
+#include "ble/Gap.h"
+#include "ble/services/UARTService.h"
+#include "LSM9DS1/LSM9DS1.h"
+#include "PinDetect.h"
+#include "OneButton.h"
+#include "Sht31.h"
+#include "nrf51_rtc.h"
+#include "string.h"
+
+//LSM9DS1 imu(p30, p7);
+BLEDevice  ble;//create object of BLE class
+OneButton one(P0_1);//create object of OneButton class
+Sht31 sht31(P0_29,P0_28);//sda,scl
+//Serial pc(P0_9,P0_11);//TX,RX
+//Serial pc(USBTX, USBRX);//create a serial port connected to specified transmit and receive pin
+
+#define NEED_CONSOLE_OUTPUT 1 /* Set this if you need debug messages on the console;
+                               * it will have an impact on code-size and power consumption. */
+#define PERIODIC_UPDATE 1                               
+
+#if NEED_CONSOLE_OUTPUT
+#define DEBUG(...) { pc.printf(__VA_ARGS__); }
+#else
+#define DEBUG(...) /* nothing */
+#endif /* #if NEED_CONSOLE_OUTPUT */
+
+
+//DigitalOut led1(LED1);
+//DigitalOut ledPin(P0_18);//create object of DigitalOut class
+Serial pc(P0_9,P0_11);//TX,RX create object of Serial class
+//PinDetect pb(P0_1);
+
+UARTService *uartServicePtr;//pointer to uartservice class
+//UARTService *uartServicePtrRx;
+//uint8_t value=0;
+//volatile int checkTime=0;
+Ticker timer,rtc_ticker;//create object of ticker class
+//Ticker ticket;//create object of another ticker class
+
+// Global variable
+//int volatile count=0;
+//int volatile count1=0;
+bool volatile flag1=false,flag2=false,flag3=false,flag4=false;
+bool volatile ti=false,tc=false,dc=false,rf=false,nc=false,sdt=false,sti=false;
+char readData1[20],readData2[20];
+char date1[21];
+//bool volatile flag2=false;
+
+#define PERIOD 5
+//Function Declarations
+void pb_shortpress_hit_callback (void);
+void pb_longpress_hit_callback (void);
+void print();
+void disconnectionCallback(const Gap::DisconnectionCallbackParams_t *params);
+void connectionCallback(const Gap::ConnectionCallbackParams_t *params);
+void onDataWritten(const GattWriteCallbackParams *params);
+void onDataRead(const GattReadCallbackParams *params); 
+void bleInit(void);
+void periodicCallback(void);
+void bleShutdown(void);
+void buttonSetting(void);
+void onTick(void);
+void radioOff(const Gap::DisconnectionCallbackParams_t *params);
+//void eventProcess(const EventProcessCallbackParams_t *params);
+time_t example_time(uint16_t sec,uint16_t min,uint16_t hr,uint16_t mahina,uint16_t day,uint16_t saal);
+void print_time(); 
+void update_rtc();
+
+
+int main(void)
+{
+    //printf("0\n");
+    uint8_t j=0;
+    char TI[21]="timeintervalchangeok";
+    char C[21]="currenttimechange ok";
+    char D[21]="currentdatechange ok";
+    char RF[21]="radiofunctionalityof";
+    char NC[21]="invalid command sent";
+    char LT[21]="last time duration:";
+    char LT1[21]="last time duration:";
+    char LT2[21]="last timeduration:";
+    char LT3[21]="lst timeduration:";
+    char LT4[21]="ls timeduartion:";
+    char LT5[21]="l timeduartion:";
+    char LT6[21]="invalid timeduration";
+    char L[5];
+    //char *p="send";
+    //uint8_t data[8];
+    //uint8_t length=strlen((const char*)rdata);
+    //const GattReadCallbackParams *params;
+    //char s1[5]="ti";
+    //char s2[5]="tr";
+    char *cmd[2];
+    char *token,*ct1;
+    char *dt[3];
+    volatile float timeInterval=5.0f;
+    char delim[]=",";
+    char delim1[]="-";
+    volatile uint16_t sec=15;
+    volatile uint16_t min=20;
+    volatile uint16_t hr=15;
+    volatile uint16_t mahina=00;
+    volatile uint16_t day=31;
+    volatile uint16_t saal=2019;
+    volatile uint16_t tsaal=0;
+    //memset(cmd[0],'\0',sizeof(cmd[0]));
+    //memset(cmd[1],'\0',sizeof(cmd[1]));
+    //memset(dt[0],'\0',sizeof(dt[0]));
+    //memset(dt[1],'\0',sizeof(dt[1]));
+    //memset(dt[2],'\0',sizeof(dt[2]));
+    //memset(cmd[0],0,sizeof(cmd[0]));
+    //memset(cmd[1],0,sizeof(cmd[1])); 
+    //led1 = 1;
+    //ledPin=1;
+    //ble_error_t error;
+    //Ticker ticker;
+    //ticker.attach(&periodicCallback,0.1);
+    //DEBUG("Initialising the nRF51822\n\r");
+    //pc.printf("PC: Initialising the nRF51822\n\r");
+    //pc.printf("hello");
+    //error=ble.shutdown();
+    //printf("1:->%d\n",error);
+    //pc.baud(9600);
+    // user selectable, any time < 512 seconds is OK
+    
+    //Ticker rct_ticker;
+    //print_time();
+    printf("1\n");
+ 
+    
+    one.setClickTicks(100);//set after how many milliseconds a click i.e shortpress is detected ;100ms
+    printf("2\n");
+    one.setPressTicks(2000);//set after how many milliseconds a press i.e longpress is detected ;2000ms
+    printf("3\n");
+    one.attachClick(pb_shortpress_hit_callback);//set callback function to be called when shortpress is detected
+    printf("4\n");
+    one.attachLongPressStop(pb_longpress_hit_callback);//set callback function to be called when longpress is detected
+    printf("5\n");
+        
+    ble.init();//Initialize the BLE controller. This should be called before using anything else in the BLE API.
+    printf("6\n");
+    //ble.onConnection(connectionCallback);
+    ble.onDisconnection(disconnectionCallback);    
+    ble.onDataWritten(onDataWritten);//set a callback function to be called when client has send data to peripheral
+    //ble.onDataRead(onDataRead);//set a callback function to be called when peripheral send data to client
+    printf("7\n");
+    //pc.printf("2\n");
+    //pc.printf("%d\n",value);
+    /* setup advertising */
+    ble.accumulateAdvertisingPayload(GapAdvertisingData::BREDR_NOT_SUPPORTED);//advertising payload data
+    printf("8\n");
+    /**BREDR_NOT_SUPPORTED  :-Peripheral device is LE only and does not support Bluetooth Enhanced DataRate.**/
+    
+    ble.setAdvertisingType(GapAdvertisingParams::ADV_CONNECTABLE_UNDIRECTED);//set the GAP advertising mode
+    printf("9\n");
+    /*It determine how the device appears to other scanner and peripheral devices in the scanning range.
+    *Device is connectable, scannable and doesn't expect connection from a specific peer.*/
+    
+    ble.accumulateAdvertisingPayload(GapAdvertisingData::SHORTENED_LOCAL_NAME,
+                                     (const uint8_t *)"BLE UART", sizeof("BLE UART") - 1);
+    printf("10\n");                                    
+     /**Provide a short name to our device instead of ID ,our device will discoverable by name BLE UART**/
+                                                                          
+    ble.accumulateAdvertisingPayload(GapAdvertisingData::COMPLETE_LIST_128BIT_SERVICE_IDS,
+                                     (const uint8_t *)UARTServiceUUID_reversed, sizeof(UARTServiceUUID_reversed));
+    printf("11\n");                                     
+    /**Advertising payload contains information about UUID assigned to service being used by our device **/
+                                          
+    ble.setAdvertisingInterval(1000); /* 1000ms; in multiples of 0.625ms. */
+    printf("12\n");
+    ble.startAdvertising();//start advertising procedure
+    printf("13\n");
+    UARTService uartService(ble);
+    //UARTService uartService1(ble);
+    uartServicePtr = &uartService;
+    //uartServicePtrRx = &uartService1;
+    //uartServicePtrRx=&uartService;
+    rtc_ticker.attach(&update_rtc, PERIOD); // update the time regularly
+    time_t initial_time = example_time(sec,min,hr,mahina,day,saal);// format:-sec:min:hour:month:day:year
+    rtc.set_time(initial_time);
+    printf("14\n");
+    print_time();
+    //timeInterval=atof(cmd[1]); 
+    timer.attach(&print,timeInterval);//function used to call print function after certain time period set by user
+    sprintf(L, "%g", timeInterval);//%g
+    printf("15\n");
+    //printf("L:%s\n",L);
+    //buttonSetting();
+    //UARTService uartService(ble);
+    //uartServicePtr = &uartService; 
+   // buttonSetting();
+    
+     
+    while (true) {
+                  
+       one.tick();// call this function every some milliseconds for handling button events.
+       one.isLongPressed();// call this function every some milliseconds for handling button events.
+       
+       //printf("15.5");
+       //char LT[21]="lasttimeduration";
+       /*
+       Gap::GapState_t state;
+       state=ble.getGapState();//check whether peripheral is connected to client or not  
+       if(state.connected==1)
+       {
+           uartServicePtrRx->write(rdata,strlen(rdata));
+       }
+       */
+          
+       token=strtok(readData1,delim);
+       
+       //printf(token);  
+       if(flag3==true)
+       {
+           printf("16\n");
+           //printf("\n");    
+           //printf("odw\n");
+           //p=strstr(readData1,s1);//search for a substring inside another string 
+           //printf(readData1);
+           //printf("token:%s\n",token);
+           while(token != NULL)
+           {
+                 //printf("%s\n", token);
+                 //printf("j:%d\n",j);
+                 cmd[j++]=token;
+                 token = strtok(NULL, delim);
+                 printf("17\n");
+           }
+           //printf("token:%s\n",token);
+           printf("%s\n",cmd[0]);
+           //printf("%d\n",cmd[0]);
+           //printf("%s\n",cmd[1]);
+           //printf("%d\n",cmd[1]);
+           
+           //ct1=strtok(cmd[1],delim1);           
+           //ct2=strtok(&cmd[1],delim1);
+           printf("%s\n",cmd[0]);
+           //printf("%s\n",cmd[1]);
+           //j=0;
+           printf("%s\n",cmd[0]);
+           //printf("%s\n",cmd[1]);
+           //printf("%s\n",ct1);
+           //printf("%s\n",ct2);
+           //printf("%s\n",ct);
+           if(strcmp(cmd[0],"TI")==0)
+           {
+              //ti=true;
+              printf("18\n");
+              //printf("j:%d\n",j);
+              //time_t initial_time = example_time(00,20,04,01,30,2019);// format:-sec:min:hour:month:day:year
+              //rct.set_time(initial_time);
+              //strcat(LT,cmd[1]);
+              printf("%s\n",cmd[1]);
+              timeInterval=atof(cmd[1]);
+              printf("%f\n",timeInterval);
+              sprintf(L,"%g",timeInterval);
+              printf("18.6\n"); 
+              printf("L:%s\n",L);
+              //uartServicePtr->write(TI,strlen(TI));
+              timer.attach(&print,timeInterval);//function used to call print function after certain time period set by user
+              ti=true;
+              printf("18.7\n");
+              //rct_ticker.attach(&update_rct, timeInterval); // update the time regularly
+              //token=NULL;
+              //uartServicePtr->write(rdata,strlen(rdata)); 
+           }
+           
+           else if(strcmp(cmd[0],"radio off")==0)
+           {
+               rf=true;
+               printf("19\n");
+               //printf("j:%d\n",j);
+               //uartServicePtr->write(RF,strlen(RF));
+               
+               ble.stopAdvertising();
+               
+               //uartServicePtr->write(rdata,strlen(rdata));
+           }
+           
+           else if(strcmp(cmd[0],"CT")==0)
+           {
+               j=0;
+               tc=true;
+               ct1=strtok(cmd[1],delim1);
+               printf("20\n");
+                             
+               
+               //rct_ticker.detach();
+               //printf("ct1:%s\n",ct1);
+               while(ct1 != NULL)
+               {
+                    //printf("j:%d\n",j);
+                    //printf("%s\n", ct1);                    
+                    dt[j++]=ct1;
+                    ct1 = strtok(NULL, delim1);
+                    printf("21\n");
+               }
+               //printf("%s\n",ct1);
+               //printf("%s\n",dt[0]);
+               //printf("%s\n",dt[1]);
+               //printf("%s\n",dt[2]);
+               sec=atoi(dt[0]);
+               min=atoi(dt[1]);
+               hr=atoi(dt[2]);
+               //printf("%d:",sec);
+               //printf("%d:",min);
+               //printf("%d::",hr);
+               //printf("%d:",mahina);
+               //printf("%d:",day);
+               //printf("%d\n",saal);
+               //mahina=atoi(date[3]);
+               //day=atoi(date[4]);
+               //saal=atoi(date[5]);
+               //uartServicePtr->write(ct,strlen(ct));
+               
+               time_t initial_time = example_time(sec,min,hr,mahina,day,saal);//format:-sec:min:hour:month:day:year
+               rtc.set_time(initial_time);
+               
+               //rct_ticker.attach(&update_rct, timeInterval); // update the time regularly 
+               //timer.attach(&print,timeInterval);//function used to call print function after certain time period set by user
+               //timeInterval=atof(cmd[1*]); 
+               //uartServicePtr->write(rdata,strlen(rdata));
+               printf("22\n");
+               //ct1=NULL;                      
+           }
+           
+           else if(strcmp(cmd[0],"CD")==0)
+           {
+               j=0;
+               dc=true;
+               ct1=strtok(cmd[1],delim1);
+               printf("23\n");
+               
+              // printf("20\n");
+               //rct_ticker.detach();
+               //printf("ct1:%s\n",ct1);
+               while(ct1 != NULL)
+               {
+                    //printf("j:%d\n",j);
+                    //printf("%s\n", ct1);
+                    dt[j++]=ct1;
+                    ct1 = strtok(NULL, delim1);
+                    printf("24\n");
+               }
+               //printf("ct2:%s\n",ct2);
+               //printf("%s\n",dt[0]);
+               //printf("%s\n",dt[1]);
+               //printf("%s\n",dt[2]);
+               //sec=atoi(date[0]);
+               //min=atoi(date[1]);
+               //hr=atoi(date[2]);
+               mahina=atoi(dt[0]);
+               day=atoi(dt[1]);
+               tsaal=atoi(dt[2]);
+               if(tsaal > 1900)
+               {
+                   //uartServicePtr->write(CD,strlen(CD)); 
+                   
+                   saal=atoi(dt[2]);
+                   time_t initial_time = example_time(sec,min,hr,mahina,day,saal);//format:-sec:min:hour:month:day:year               
+                   rtc.set_time(initial_time);
+                                 
+               }
+               
+               //printf("%d:",sec);
+               //printf("%d:",min);
+               //printf("%d::",hr);
+               //printf("%d:",mahina);
+               //printf("%d:",day);
+               //printf("%d\n",saal);
+               //rct_ticker.attach(&update_rct, timeInterval); // update the time regularly 
+               //timer.attach(&print,timeInterval);//function used to call print function after certain time per
+               //timeInterval=atof(cmd[1]); 
+               
+               printf("25\n");
+               //ct1=NULL;0
+           }
+           
+           else if(strcmp(cmd[0],"SCTD")==0)
+           {               
+               sdt=true;
+               printf("25.5\n");                                             
+           }
+           
+           
+           else if(strcmp(cmd[0],"SCTI")==0)
+           {
+               sti=true;
+               printf("25.6\n");
+               printf("1%d\n",sti);
+               //strcat(LT,L);               
+           }
+           
+           else
+           {
+               nc=true;
+               //timer.detach();
+               //rct_ticker.detach();
+               //printf("invalid command!!!");
+               //uartServicePtr->write(NC,strlen(NC));
+               
+           }
+            //
+            //printf("timeinterval:->%f\n",timeInterval);
+            //timer.attach(&print,timeInterval);//function used to call print function after certain time period set by user 
+            //rct_ticker.attach(&update_rct, PERIODIC_UPDATE); // update the time regularly 
+           //printf("\n");
+           //flag3=false;
+       //printf("timeinterval2:->%f\n",timeInterval); 
+       //printf("received data length:->%d\n",strlen(readData));
+       //printf("received data :->%s\r\n",readData);
+           printf("2%d\n",sti);      
+           flag3=false;
+                     
+           j=0;
+           printf("3%d\n",sti);           
+           tsaal=0;
+           printf("4%d\n",sti);           
+           token=NULL;
+           printf("5%d\n",sti);
+           ct1=NULL;
+           printf("6%d\n",sti);           
+           //memset(cmd[0],0,sizeof(cmd[0]));
+           printf("7%d\n",sti);
+           //memset(cmd[1],0,sizeof(cmd[1]));
+           printf("8%d\n",sti);
+           
+           //printf("26\n");
+           //memset(dt[0],0,sizeof(dt[0]));
+           
+           //memset(dt[1],0,sizeof(dt[1]));
+           //memset(dt[2],0,sizeof(dt[2])); 
+                         
+       }
+       
+       if((flag1)&&(flag2))
+       {
+           printf("27\n");
+           //printf("indiahasgottomanytalent\n");
+           //printf("Temp(*C):%.2f*C\n",sht31.readTemperature());
+           //printf("Humidity(%%):%.2f%%\n",sht31.readHumidity());
+           //printf("\n");
+           rtc.time();
+           print_time();
+           //printf("date:%s\n",date1);
+           //ble.updateCharacteristicValue(uartServicePtr->getRXCharacteristicHandle(), params->data, 7);//function used to update value sent by client on peripheral side
+           //uartServicePtr->write(CD,strlen(CD)); 
+           printf("\n");
+           flag1=false;
+           flag2=false;        
+       }
+           
+       if(ti==true)
+       {
+           printf("28\n");
+           //printf("L:%s\n",L);
+           //printf("%s\n",TI);
+           uartServicePtr->write(TI,strlen(TI));
+           //printf("date:%s\n",date1);
+           ti=false;
+       }
+           
+       else if(tc==true)
+       {
+           printf("29\n");
+           //printf("t1\n");
+           uartServicePtr->write(C,strlen(C));
+           //printf("date:%s\n",date1);
+           //printf("t2\n");
+           tc=false;
+       }
+       
+       
+       else if(dc==true)
+       {
+           printf("30\n");
+           //printf("d1\n");
+           uartServicePtr->write(D,strlen(D));
+           //printf("date:%s\n",date1);
+           //printf("d2\n");
+           dc=false;
+       }
+       
+       
+       else if(rf==true)
+       {
+           printf("31\n");
+           uartServicePtr->write(RF,strlen(RF));
+           //printf("date:%s\n",date1);
+           rf=false;
+       }
+       
+       else if(sdt==true)
+       {
+           printf("31.5\n");
+           rtc.time();
+           print_time();
+           printf("date1:%s\n",date1);
+           uartServicePtr->write(date1,strlen(date1));
+           //memset(date1,0,sizeof(date1));
+           sdt=false;
+       }
+       
+       
+       
+       /*
+       else if(sti==true)
+       {
+           //printf("31.6\n");
+           strcat(LT,L);
+           //printf("LT:%s\n",LT);
+           uartServicePtr->write(LT,strlen(LT));
+           strcpy(LT,LT1); 
+           //printf("lt:%s\n",LT);
+           sti=false;
+       }            
+       */
+       
+       else if(nc==true)
+       {
+           printf("32\n");
+           uartServicePtr->write(NC,strlen(NC));
+           nc=false;
+       }
+       
+       else
+       {
+           
+       }
+       
+       
+       if(sti==true)
+       {
+           printf("31.6\n");
+           if(strlen(L)==1)
+           {
+              //printf("LT:%s\n",LT);
+              strcpy(LT,LT1); 
+              strcat(LT,L);
+              //printf("%s\n",LT);
+              uartServicePtr->write(LT,strlen(LT));
+              //memset(cmd[1],0,sizeof(cmd[1]));
+              sti=false;
+           }
+           
+            else if(strlen(L)==2)
+           {
+              //printf("LT:%s\n",LT);
+              strcpy(LT,LT2); 
+              strcat(LT,L);
+              //printf("%s\n",LT);
+              uartServicePtr->write(LT,strlen(LT));
+              //sti=false;
+              //memset(cmd[1],0,sizeof(cmd[1]));
+              sti=false;
+           }
+           
+           else if(strlen(L)==3)
+           {
+              //printf("LT:%s\n",LT);
+              strcpy(LT,LT3); 
+              strcat(LT,L);
+              //printf("lt:%s\n",LT);
+              uartServicePtr->write(LT,strlen(LT));
+              //sti=false;
+              //memset(cmd[1],0,sizeof(cmd[1]));
+              sti=false;
+           }
+           
+           else if(strlen(L)==4)
+           {
+              //printf("LT:%s\n",LT);
+              strcpy(LT,LT4); 
+              strcat(LT,L);
+              //printf("lt:%s\n",LT);
+              uartServicePtr->write(LT,strlen(LT));
+              //sti=false;
+              //memset(cmd[1],0,sizeof(cmd[1]));
+              sti=false;
+           }
+           
+           else if(strlen(L)==5)
+           {
+              //printf("LT:%s\n",LT);
+              strcpy(LT,LT5); 
+              strcat(LT,L);
+              //printf("lt:%s\n",LT);
+              uartServicePtr->write(LT,strlen(LT));
+              //sti=false;
+              //memset(cmd[1],0,sizeof(cmd[1]));
+              sti=false;
+           }
+           else
+           {
+               //printf("Invalid time duartion\n");
+               uartServicePtr->write(LT6,strlen(LT6));
+               //sti=false;
+               //memset(cmd[1],0,sizeof(cmd[1]));
+               sti=false;
+           }
+        
+           //printf("L length:%d\n",strlen(L));
+           //uartServicePtr->write(LT,strlen(LT));
+           
+           
+           //memset(L,0,strlen(L));
+           
+           
+       }
+            
+       
+       //j=0;
+      // memset(cmd[0],0,sizeof(cmd[0]));
+      // memset(cmd[1],0,sizeof(cmd[1]));
+       //memset(date[0],0,sizeof(date[0]));
+       //memset(date[1],0,sizeof(date[1]));
+       //memset(date[2],0,sizeof(date[2]));
+       //memset(cmd[5],0,sizeof(cmd[5]));
+       
+       ble.processEvents();//Process ALL pending events living in the BLE stack and return once all events have been consumed.
+       //printf("33\n");
+       //state=ble.getGapState(); 
+       //printf("state.advertising:->%d\n",state.advertising);
+       //printf("state.connected:->%d\n\n",state.connected); 
+       //state=ble.getGapState(); 
+       //printf("state.advertising:->%d\n",state.advertising);
+       //printf("state.connected:->%d\n",state.connected);
+       /*
+       if((state.advertising==1)&&(state.connected==1))   
+       {
+           //printf("peripheral is connected and advertising\n");
+       }
+       else
+       {
+           //printf("peripheral is not connected and advertising\n"); 
+       }
+       */
+       //ProcessMyEvent();  
+       //ble.waitForEvent();//waitForEvent() puts the processor to sleep until a hardware interrupt occurs                    
+       //ble.onEventsToProcess(eventProcess);
+       
+    }           
+          
+}
+
+/*
+void eventProcess( const EventProcessCallbackParams_t *params)
+{
+    
+}   
+*/
+
+
+/*
+void onTick(void)
+{
+    one.tick();
+    one.isLongPressed();
+}
+
+void buttonSetting(void)
+{
+    one.sectlickTicks(100);
+    one.setPressTicks(2000);
+    one.attachClick(pb_shortpress_hit_callback);
+    one.attachLongPressStop(pb_longpress_hit_callback);
+    
+    // Use internal pullup for pushbutton
+    pb.mode(PullUp);
+    //pb1.mode(PullUp);
+    // Delay for initial pullup to take effect
+    wait(.001);
+    // Setup Interrupt callback function for a pb hit
+    pb.attach_deasserted_held(&pb_longpress_hit_callback);
+    pb.attach_deasserted(&pb_shortpress_hit_callback);
+    // Start sampling pb input using interrupts
+    pb.setSampleFrequency();//default 20ms    
+    */
+//}
+
+/*
+void bleInit(void)
+{
+    //DEBUG("Initialising the nRF51822\n\r");
+    //pc.printf("PC: Initialising the nRF51822\n\r");
+    //pc.printf("hello");
+    //ble.init();//Initialize the BLE controller. This should be called before using anything else in the BLE API.
+    printf("Initialising BLE\n");
+    ble.init();//Initialize the BLE controller. This should be called before using anything else in the BLE API.
+    ble.onDisconnection(disconnectionCallback);
+    ble.onDataWritten(onDataWritten);
+    ble.onConnection(connectionCallback);
+    //pc.printf("2\n");
+    //pc.printf("%d\n",value);
+     setup advertising 
+    
+    ble.accumulateAdvertisingPayload(GapAdvertisingData::BREDR_NOT_SUPPORTED);//advertising payload data
+    BREDR_NOT_SUPPORTED  :-Peripheral device is LE only and does not support Bluetooth Enhanced DataRate.
+   
+    ble.setAdvertisingType(GapAdvertisingParams::ADV_CONNEctABLE_UNDIREctED);//set the GAP advertising mode
+    It determine how the device appears to other scanner and peripheral devices in the scanning range.
+    Device is connectable, scannable and doesn't expect connection from a specific peer.*/
+    
+    //ble.accumulateAdvertisingPayload(GapAdvertisingData::SHORTENED_LOCAL_NAME,
+    //                                 (const uint8_t *)"BLE UART", sizeof("BLE UART") - 1);
+    //Provide a short name to our device instead of ID ,our device will discoverable by name BLE UART**/
+                                                                          
+    //ble.accumulateAdvertisingPayload(GapAdvertisingData::COMPLETE_LIST_128BIT_SERVICE_IDS,
+    //                                 (const uint8_t *)UARTServiceUUID_reversed, sizeof(UARTServiceUUID_reversed));
+    //Advertising payload contains information about UUID assigned to service being used by our device */
+                                          
+    //ble.setAdvertisingInterval(1000); /* 1000ms; in multiples of 0.625ms. */
+    //ble.startAdvertising();//start advertising procedure
+
+    //UARTService uartService(ble);
+    //uartServicePtr = &uartService; 
+
+    //UARTService uartService(ble);
+    //uartServicePtr = &uartService;    
+//}
+
+time_t example_time(uint16_t sec,uint16_t min,uint16_t hr,uint16_t mahina,uint16_t day,uint16_t saal) {
+    //0 set an intial time
+    //  ...not really necessary for this example, but it beats setting it to 0 or some non-obvious large integer (# of seconds since 1/1/1970)
+    time_t rawtime=0;
+
+    struct tm * init_timeinfo;
+
+    init_timeinfo = localtime(&rawtime); // note:  must initialize the struct with this before trying to set components
+                                         // ...else code goes into the weeds!!
+    init_timeinfo->tm_sec = sec;
+    init_timeinfo->tm_min = min;//13
+    init_timeinfo->tm_hour = hr;//1
+    init_timeinfo->tm_mon = mahina;//1
+    init_timeinfo->tm_mday = day;//7
+    init_timeinfo->tm_year = saal -1900;//2015-1900        
+    //init_timeinfo->tm_year = saal;//2015-1900 
+    char date[24];
+    strftime(date,sizeof(date),"%H:%M:%S::%d/%m/%G",init_timeinfo);
+    //pc.printf("Timestamp:%s.\r\n",date);
+    //pc.printf("Time:%d:%d:%d\n",init_timeinfo->tm_hour,init_timeinfo->tm_min,init_timeinfo->tm_sec);
+    //pc.printf("Date:%d:%d:%d\n",init_timeinfo->tm_mday,init_timeinfo->tm_mon,init_timeinfo->tm_year);
+    // compute the proper value for time in time_t type
+    rawtime = mktime(init_timeinfo);
+    return rawtime;
+}
+
+void print_time() {
+    // called when a button is pushed, this prints the current time to the USB-connected console
+    //button_push_led = !button_push_led; 
+    
+    time_t rawtime=rtc.time();
+    
+    // message the time into a human-friendly format for printing
+    struct tm * timeinfo;
+    timeinfo = localtime(&rawtime);
+    char date[24];
+    strftime(date,sizeof(date),"%H:%M:%S::%d/%m/%G",timeinfo);
+    strcpy(date1,date);
+    pc.printf("Timestamp:%s.\r\n",date);
+    //pc.printf("Time:%d:%d:%d\n",init_timeinfo->tm_hour,init_timeinfo->tm_min,init_timeinfo->tm_sec);
+    //pc.printf("Date:%d:%d:%d\n",init_timeinfo->tm_mday,init_timeinfo->tm_mon,init_timeinfo->tm_year);
+    
+}
+
+// (probably) required for rct use
+void update_rtc() {
+    // for use as interrupt routine, to insure that Rct is updated periodically
+    //  ...if rct is not read before the underlying counter rolls over (typically 512 seconds), the Rct value will be wrong
+    //  ...ideally this would be done as part of the nrf51_rct method, but I couldn't get it to behave (see nrf51_rct.cpp for details)
+    flag2=true;
+    //rct_update_led = !rct_update_led;
+}
+
+// Callback routine is interrupt activated by a debounced pb hit
+// Callback routine to turn on peripheral radio functionality 
+// If device is not connected this callback function gets called and peripheral starts advertising
+// and if device is connected this funcrion does not do anything 
+void pb_shortpress_hit_callback (void) {
+    //flag1=true;    
+   
+    //wait(2);
+    Gap::GapState_t state;
+    state=ble.getGapState();//check whether peripheral is connected to client or not
+    //printf("state:->%d\n",state.connected);
+    if(state.connected==0)
+        {
+            //printf("Advertising on\n");
+            //printf("NRF51822 Disconnected");
+            ble.startAdvertising();//start advertising of peripheral
+            //wait(10);
+           //printf("radio on\n");
+           //ble.init();//Initialize the BLE controller. This should be called before using anything else in the BLE API.
+           //ble.onDisconnection(disconnectionCallback);
+           //ble.onDataWritten(onDataWritten);
+           //pc.printf("2\n");
+           //pc.printf("%d\n",value);
+           /* setup advertising */
+           //ble.accumulateAdvertisingPayload(GapAdvertisingData::BREDR_NOT_SUPPORTED);//advertising payload data
+           /**BREDR_NOT_SUPPORTED  :-Peripheral device is LE only and does not support Bluetooth Enhanced DataRate.**/
+     
+           //ble.setAdvertisingType(GapAdvertisingParams::ADV_CONNEctABLE_UNDIREctED);//set the GAP advertising mode
+           /*It determine how the device appears to other scanner and peripheral devices in the scanning range.
+           *Device is connectable, scannable and doesn't expect connection from a specific peer.*/
+    
+           //ble.accumulateAdvertisingPayload(GapAdvertisingData::SHORTENED_LOCAL_NAME,
+           //                          (const uint8_t *)"BLE UART", sizeof("BLE UART") - 1);
+           /**Provide a short name to our device instead of ID ,our device will discoverable by name BLE UART**/
+                                                                          
+           //ble.accumulateAdvertisingPayload(GapAdvertisingData::COMPLETE_LIST_128BIT_SERVICE_IDS,
+           //                          (const uint8_t *)UARTServiceUUID_reversed, sizeof(UARTServiceUUID_reversed));
+           /**Advertising payload contains information about UUID assigned to service being used by our device **/
+                                          
+           //ble.setAdvertisingInterval(1000); /* 1000ms; in multiples of 0.625ms. */
+           //ble.startAdvertising();//start advertising procedure
+
+           //UARTService uartService(ble);
+           //uartServicePtr = &uartService; 
+
+           //flag1=false;
+           //flag2=false;
+                        
+        }
+    else
+    {
+        //printf("Advertising off\n");
+        //printf("NRF51822 Connected");
+    }     
+    //++count1;
+    //myled4 = count & 0x01;
+    //myled3 = (count & 0x02)>>1;
+    //myled2 = (count & 0x04)>>2;
+}
+
+// Callback routine is interrupt activated by a debounced pb hit
+// Callback routine to turn off peripheral radio functionality 
+// If device is not connected this callback function gets called and stops advertising of peripheral
+// and if device is connected this funcrion does not do anything 
+void pb_longpress_hit_callback (void) {
+    //count1++;
+    //flag2=true;
+    //printf("Advertising off\n");
+    ble.stopAdvertising();//stop advertising of peripheral    
+    /*
+    if(flag2==true)
+    {
+            printf("Disabling BLE");
+            //connectionCallback();
+            //ble.stopAdvertising();
+            //ble.shutdown();
+            //wait(0.5f);
+            flag1=false;
+            flag2=false;
+            //count1=0;
+    }
+    */
+    //myled4 = count & 0x01;
+    
+    //myled3 = (count & 0x02)>>1;
+    //myled2 = (count 4444444444444444444444444444444444444& 0x04)>>2;
+}
+
+//callback function gets called at time interval which is set through app  
+void print() {
+    //Serial pc(P0_9,P0_11);//TX,RX
+    //checkTime=1;
+    //printf("%d,%d",(int)sht31.readTemperature(),(int) sht31.readHumidity());
+    //printf("indiahasgottomanytalent");
+    flag1=true;
+    //wait(0.3f);
+    //printf("\n");
+    //wait(2);
+}
+
+void disconnectionCallback(const Gap::DisconnectionCallbackParams_t *params)//gap structure contains information about disconnection event
+{
+    //DEBUG("Disconnected!\n\r");
+    //DEBUG("Restarting the advertising process\n\r");
+    ble.stopAdvertising();//stop advertising procedure
+}
+
+void radioOff(const Gap::DisconnectionCallbackParams_t *params)
+{
+    DEBUG("stop");
+    ble.stopAdvertising();
+}
+
+void connectionCallback(const Gap::ConnectionCallbackParams_t *params)
+{
+    //buttonSetting();
+    //ticket.attach(&onTick,1);
+    //gpio_irq_disable((gpio_irq_t)&one);
+}
+
+//Callback function which gets called when some data is sent from client i.e mobile(in our case) to peripheral
+void onDataWritten(const GattWriteCallbackParams *params)
+{
+    
+    if ((uartServicePtr != NULL) && (params->handle == uartServicePtr->getTXCharacteristicHandle())){
+                
+        uint16_t bytesRead = params->len;
+        //uint8_t j=0;       
+        char readData[20];
+        
+        //uint8_t value1=*(param->data);        
+        memset(readData,0,sizeof(readData)); 
+        memset(readData1,0,sizeof(readData1));
+        //memset(cmd1,0,sizeof(cmd1));
+        //memset(cmd2,0,sizeof(cmd2));
+                       
+        //printf("\n");
+        
+        for(int i=0;i < bytesRead;i++)
+        {
+            readData[i]= (params->data[i]);
+            readData1[i]=(params->data[i]);    //printf("%c",readData[i]);
+        }
+        
+        
+       /*         
+       p=strstr(readData1,s1); 
+       printf(readData1);
+       if(p)
+       {
+           printf("sf");//time interval input
+           token=strtok(readData1,",");
+            while (token != NULL)
+            {
+                 cmd[j++] = token;
+                 p = strtok (NULL, ",");
+            }
+            printf("%s\n",cmd[0]);
+            printf("%s\n",cmd[1]);
+       }
+       else
+       {
+           printf("snf");
+       }
+       
+       
+       timeInterval=atof(readData);
+       //printf("timeinterval:->%f\n",timeInterval); 
+       
+       //printf("timeinterval2:->%f\n",timeInterval); 
+       //printf("received data length:->%d\n",strlen(readData));
+       //printf("received data :->%s\r\n",readData);
+       timer.attach(&print,timeInterval);//function used to call print function after certain time period set by user
+       rct_ticker.attach(&update_rct, PERIODIC_UPDATE); // update the time regularly
+       */
+       //timeInterval=(float)readData;
+       
+       //mcpy(value,params->data);
+        //int value;
+       //int8_t value1=*(params->data);
+        
+        //pc.printf("1\n");
+        //pc.printf("%d\n",value);
+        /*
+        if(value==1)
+        {
+          ledPin=0;//led high
+          wait(5);
+        }
+        else
+        {
+          ledPin=1;//led low  
+        }
+        */
+        //canf((const char*)(params->data)),"%d",&value);
+        //canf((char*)(*(params->data)),"%d",&value);
+        
+        
+        //uint16_t status;
+        //DEBUG("received %u bytes\n\r",bytesRead);
+        
+        //params->data=NULL;
+        //BUG("recevied %u data\n\r",value);
+        //printf("received data :->%d\n\r",value1);
+        //DEBUG("DATA read %d\n\r",value1);
+        /*
+        swicth(value) {
+            case 49:
+                DEBUG("Off power\n\r");
+                status = imu.begin(imu.G_SCALE_245DPS, imu.A_SCALE_2G, imu.M_SCALE_4GS,
+                                            imu.G_POWER_DOWN, imu.A_POWER_DOWN, imu.M_ODR_0625);
+                break;
+            case 50:
+                DEBUG("Low power\n\r");
+                status = imu.begin(imu.G_SCALE_245DPS, imu.A_SCALE_2G, imu.M_SCALE_4GS,
+                                            imu.G_ODR_15_BW_0, imu.A_POWER_DOWN, imu.M_ODR_0625);
+                break;
+            case 51:
+                DEBUG("High power\n\r");
+                status = imu.begin(imu.G_SCALE_2000DPS, imu.A_SCALE_8G, imu.M_SCALE_16GS,
+                                            imu.G_ODR_952_BW_100, imu.A_ODR_952, imu.M_ODR_80);
+                break;
+            default:
+                DEBUG("Nothing happened\n\r");
+                break;
+        }
+         */       
+        //pc.printf("LSM9DS1 WHO_AM_I's returned: 0x%X\r\n", status);
+        //pc.printf("Should be 0x683D\r\n");
+        
+        ble.updateCharacteristicValue(uartServicePtr->getRXCharacteristicHandle(), params->data, bytesRead);//function used to update value sent by client on peripheral side
+        //printf("timeinterval2:->%f\n",timeInterval); 
+        //BUG("Data read->%d\n\r",*(params->data));
+         //printf("received data :->%s\n\r",readData);
+        memset((uint16_t*)params->data,0,sizeof(params->data));
+        flag3=true;
+        //timer.detach();
+        //params->data=NULL;
+    }
+    
+}
+
+/*
+//Callback function which gets called when some data is sent from peripheral i.e mobile(in our case) to client
+void onDataRead(const GattReadCallbackParams *params)
+{
+    
+    if ((uartServicePtr != NULL) && (params->handle == uartServicePtr->getRXCharacteristicHandle())){
+                
+        
+        //uint8_t j=0;       
+        char readData[10];
+        uint16_t bytesRead = params->len;
+        //params->len=bytesRead;
+        //uint8_t value1=*(param->data);        
+        memset(readData,0,sizeof(readData)); 
+        memset(readData2,0,sizeof(readData2));
+        //memset(cmd1,0,sizeof(cmd1));
+        //memset(cmd2,0,sizeof(cmd2));
+                       
+        //printf("\n");
+        
+        for(int i=0;i < bytesRead;i++)
+        {
+            readData[i]=(params->data[i]);
+            readData2[i]=(params->data[i]);    //printf("%c",readData[i]);
+        }
+        
+        flag4=true;
+                
+       p=strstr(readData1,s1); 
+       printf(readData1);
+       if(p)
+       {
+           printf("sf");//time interval input
+           token=strtok(readData1,",");
+            while (token != NULL)
+            {
+                 cmd[j++] = token;
+                 p = strtok (NULL, ",");
+            }
+            printf("%s\n",cmd[0]);
+            printf("%s\n",cmd[1]);
+       }
+       else
+       {
+           printf("snf");
+       }
+       
+       
+       timeInterval=atof(readData);
+       //printf("timeinterval:->%f\n",timeInterval); 
+       
+       //printf("timeinterval2:->%f\n",timeInterval); 
+       //printf("received data length:->%d\n",strlen(readData));
+       //printf("received data :->%s\r\n",readData);
+       timer.attach(&print,timeInterval);//function used to call print function after certain time period set by user
+       rct_ticker.attach(&update_rct, PERIODIC_UPDATE); // update the time regularly
+       
+       //timeInterval=(float)readData;
+       
+       //mcpy(value,params->data);
+        //int value;
+       //int8_t value1=*(params->data);
+        
+        //pc.printf("1\n");
+        //pc.printf("%d\n",value);
+        /*
+        if(value==1)
+        {
+          ledPin=0;//led high
+          wait(5);
+        }
+        else
+        {
+          ledPin=1;//led low  
+        }
+        */
+        //canf((const char*)(params->data)),"%d",&value);
+        //canf((char*)(*(params->data)),"%d",&value);
+        
+        
+        //uint16_t status;
+        //DEBUG("received %u bytes\n\r",bytesRead);
+        
+        //params->data=NULL;
+        //BUG("recevied %u data\n\r",value);
+        //printf("received data :->%d\n\r",value1);
+        //DEBUG("DATA read %d\n\r",value1);
+        /*
+        swicth(value) {
+            case 49:
+                DEBUG("Off power\n\r");
+                status = imu.begin(imu.G_SCALE_245DPS, imu.A_SCALE_2G, imu.M_SCALE_4GS,
+                                            imu.G_POWER_DOWN, imu.A_POWER_DOWN, imu.M_ODR_0625);
+                break;
+            case 50:
+                DEBUG("Low power\n\r");
+                status = imu.begin(imu.G_SCALE_245DPS, imu.A_SCALE_2G, imu.M_SCALE_4GS,
+                                            imu.G_ODR_15_BW_0, imu.A_POWER_DOWN, imu.M_ODR_0625);
+                break;
+            case 51:
+                DEBUG("High power\n\r");
+                status = imu.begin(imu.G_SCALE_2000DPS, imu.A_SCALE_8G, imu.M_SCALE_16GS,
+                                            imu.G_ODR_952_BW_100, imu.A_ODR_952, imu.M_ODR_80);
+                break;
+            default:
+                DEBUG("Nothing happened\n\r");
+                break;
+        }
+         */       
+        //pc.printf("LSM9DS1 WHO_AM_I's returned: 0x%X\r\n", status);
+        //pc.printf("Should be 0x683D\r\n");
+        
+        //ble.updateCharacteristicValue(uartServicePtr->getRXCharacteristicHandle(), params->data, bytesRead);//function used to update value sent by client on peripheral side
+        //printf("timeinterval2:->%f\n",timeInterval); 
+        //BUG("Data read->%d\n\r",*(params->data));
+         //printf("received data :->%s\n\r",readData);
+        //memset((uint16_t*)params->data,0,sizeof(params->data));
+        //memset(readData,0,sizeof(readData));
+        //timer.detach();
+        //params->data=NULL;
+    //}
+    
+//}
+
+void periodicCallback(void)
+{
+    //led1 = !led1;
+    //timer.attach(&print, timeInterval);
+}
+
+
+void bleShutdown(void)
+{
+    printf("Disabling BLE");
+    ble.shutdown();
+}
+       
